@@ -12,20 +12,45 @@ on:
       - main
 
 env:
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/api-service
+  # Nombre local de la imagen, sin registro. El CI construye, testea y escanea
+  # sin necesidad de credenciales; el nombre completo de Docker Hub se arma
+  # recién en el job de CD, que sí tiene acceso a los secrets.
+  IMAGE_NAME: api-service
 
 jobs:
   # ─────────────────────────────────────────
   # CI — build + test + scan
   # corre en PRs y en push a cualquier rama
+  # No requiere secrets: un PR desde un fork también lo ejecuta completo.
   # ─────────────────────────────────────────
   ci:
     name: CI — Build & Test
     runs-on: ubuntu-latest
 
+    outputs:
+      # El job de CD lee esta salida para decidir si puede publicar.
+      has_dockerhub: ${{ steps.check_secrets.outputs.has_dockerhub }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # El contexto `secrets` no está disponible en el `if` de un job, así que
+      # se evalúa acá y se expone como output.
+      - name: Check Docker Hub credentials
+        id: check_secrets
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "has_dockerhub=true" >> "$GITHUB_OUTPUT"
+            echo "Credenciales presentes: el push a Docker Hub va a ejecutarse."
+          else
+            echo "has_dockerhub=false" >> "$GITHUB_OUTPUT"
+            echo "Sin credenciales de Docker Hub: se omite la publicación." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # Configura QEMU para builds multi-plataforma (amd64 + arm64)
       - name: Set up QEMU
@@ -95,9 +120,11 @@ jobs:
     name: CD — Push to Docker Hub
     runs-on: ubuntu-latest
     needs: ci                    # espera que CI pase
+    # Solo publica si hay credenciales configuradas Y estamos en main o en un tag.
     if: |
-      (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
-      startsWith(github.ref, 'refs/tags/v')
+      needs.ci.outputs.has_dockerhub == 'true' &&
+      ((github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+       startsWith(github.ref, 'refs/tags/v'))
 
     steps:
       - name: Checkout code
@@ -116,6 +143,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}   # usar token, no password
 
+      # Acá sí se arma el nombre con el registro: usuario/imagen
+      - name: Resolve registry image name
+        id: img
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: echo "name=$DOCKERHUB_USERNAME/${{ env.IMAGE_NAME }}" >> "$GITHUB_OUTPUT"
+
       # Genera los tags automáticamente según el evento
       # Push a main     → imagen:main  +  imagen:sha-abc1234
       # Tag v1.2.3      → imagen:1.2.3  +  imagen:1.2  +  imagen:1  +  imagen:latest
@@ -123,7 +157,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_NAME }}
+          images: ${{ steps.img.outputs.name }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -151,7 +185,7 @@ jobs:
         run: |
           echo "## Docker Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image pushed:** \`${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image pushed:** \`${{ steps.img.outputs.name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
