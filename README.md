@@ -5,7 +5,7 @@ Automated Docker image build, test, and push pipeline using GitHub Actions.
 ## Pipeline
 
 ```
-PR opened          →  CI: build + health test + Trivy scan
+PR opened          →  CI: build + health test + Trivy, gitleaks, Semgrep, pip-audit
 Merge to main      →  CI + CD: push to Docker Hub  (tags: main, sha-xxxxxxx, latest)
 Tag v1.2.3 pushed  →  CI + CD: push to Docker Hub  (tags: 1.2.3, 1.2, 1, latest)
 ```
@@ -33,7 +33,12 @@ curl http://localhost:8000/health
 - **Multi-stage build** — builder stage installs deps, runtime stage is minimal
 - **Non-root user** — container runs as `appuser` (uid 1001), not root
 - **Health check** — Docker and pipeline both verify the container responds
-- **Trivy scan** — checks for known CVEs in the final image
+- **Trivy scan** — fails on fixable HIGH or CRITICAL CVEs in the final image
+- **gitleaks** — scans the full git history for committed secrets
+- **Semgrep** — static analysis of the Python code and Dockerfile
+- **pip-audit** — fails on dependencies with known vulnerabilities
+- **Publish gate** — the CD job only runs if every check above passes
+- **Pinned actions** — third-party actions are pinned to a commit SHA and updated by Dependabot
 - **Multi-platform** — builds for `linux/amd64` and `linux/arm64`
 - **Layer caching** — `cache-from/to: gha` reuses layers between pipeline runs
 - **Semantic versioning** — tags generated automatically from git tags
