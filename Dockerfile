@@ -1,6 +1,6 @@
 # ── Stage 1: builder ──────────────────────────────────────
 # Instala dependencias en una imagen temporal
-FROM python:3.12-slim AS builder
+FROM python:3.15-slim AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ RUN pip install --upgrade pip && \
 
 # ── Stage 2: runtime ──────────────────────────────────────
 # Imagen final mínima — sin herramientas de build
-FROM python:3.12-slim AS runtime
+FROM python:3.15-slim AS runtime
 
 # Non-root user — buena práctica de seguridad
 RUN groupadd --gid 1001 appgroup && \
